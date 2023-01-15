@@ -35,6 +35,14 @@ class LessonLevel(str, Enum):
 #     "price": float,
 # }
 
+class Search(BaseModel):
+    instructorName: str
+    lessonName: str
+    level: list[str]
+    price: int
+    date: str
+
+
 class Lesson(BaseModel):
     ParticipantsList: list[str]
     description: str = ""
@@ -119,5 +127,20 @@ def get_participant_phone(participant_id: str) -> str:
 @app.get("/instructor/name")
 def get_instructor_name(instructor_id: str) -> str:
     return dal.get_instructor_name(instructor_id)
+
+@app.get("/instructor/id")
+def get_instructor_id(instructor_name: str) -> str:
+    return dal.get_instructor_id(instructor_name)
+
+@app.post("/lessons/search")
+def get_lessons_by_search(search: Search) -> list:
+    return dal.get_lessons_by_search(search.dict())
+
+
+
+
+@app.get("/instructor/statistics")
+def get_instructor_name(instructorId: str,startDate: str , endDate:str) -> dict:
+    return dal.get_instructor_stat(instructorId,startDate,endDate)
 
 

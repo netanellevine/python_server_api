@@ -98,6 +98,7 @@ class data:
                 ans['message'] = 'User added successfully'
                 self.debug_print(f"__POST request__  add participant to lesson -> {ans}")
                 send_sms(self.get_instructor_phone(userId), self.get_good_message(key, lesson, userId))
+                self.debug_print("SMS notification was sent to Oshrit Weiss +972542320525.")
                 return True
             ans['result'] = False
             ans['message'] = 'Failed to add user'
@@ -196,6 +197,113 @@ class data:
         return 'None'
 
 
+    def get_instructor_id(self, instructor_name):
+        docs = self.db.collection('Instructors').get()
+        for doc in docs:
+            if doc is not None:
+                name = []
+                for k, v in doc.to_dict().items():
+                    if k == 'firstName':
+                        name.append((k, v))
+                    if k == 'lastName':
+                        name.append((k, v))
+                    if len(name) == 2:
+                        break
+                if name[0][0] == 'firstName':
+                    name = f'{name[0][1]} {name[1][1]}'
+                else:
+                    name = f'{name[1][1]} {name[0][1]}'
+                if instructor_name == name:
+                    self.debug_print(f"__GET request__  get instructor id -> returned: True, id: {doc.id}")
+                    return doc.id
+        self.debug_print(f"__GET request__  get instructor id -> returned: False, None")
+        return 'None'
+    
+
+    def get_instructor_stat(self, instructor_id, start_date, end_date):
+        di = self.db.collection('Lessons').document(instructor_id).get().to_dict()
+        if di is None:
+            return {}
+        # for key,value in di.items():
+        #     print(f"{value['price']} , {value['ParticipantsList']}")
+        di = {key: json.loads(value) for key, value in di.items() if start_date <=check_date(key) and check_date(key) <=end_date}
+        part_sum = 0
+        revenue_sum = 0.0
+        lessons = 0
+        for value in di.values():
+            lessons+=1
+            part_sum += len(value['ParticipantsList'])
+            revenue_sum += len(value['ParticipantsList'])*value['price']
+        return {"avgParticipants": part_sum/lessons, "avgRevenue" : revenue_sum/lessons,"totalLessons":lessons,"totalRevenue":revenue_sum}
+
+
+    def get_lessons_by_search(self, search):
+        filters = ['instructorName', 'lessonName', 'level', 'price', 'date']
+        query = {}
+        levels = ['A', 'B', 'C']
+        maxPrice = 2**10
+
+        for key, value in search.items():
+            if value not in [0, "string", ["string"], "", [""]]:
+                if key == 'instructorName':
+                    query['instructor_id'] = self.get_instructor_id(value)
+                    continue
+                query[key] = value
+        if query.get('level') == None:
+            query['level'] = levels
+        levels = query['level']
+        levels.append('All')
+        query.update({'level': levels})
+        self.debug_print(query)
+
+
+        if query.get('instructor_id') != None:
+            doc = self.db.collection('Lessons').document(query['instructor_id']).get().to_dict()
+            del query['instructor_id']
+            query_k = query.keys()
+            res = []
+            for date, lesson in doc.items():
+                lesson = json.loads(lesson)
+                good_keys_vals  = {key: value for key, value in lesson.items() if key in query_k}
+                # self.debug_print(good_keys_vals)
+                flag = True
+                for k, v in good_keys_vals.items():
+                    if k == 'level':
+                        if v not in query[k]:
+                            flag = False
+                            break
+                    elif k == 'price':
+                        if v > query[k]:
+                            flag = False
+                            break 
+                        else:
+                            continue
+                    elif query[k] != v:
+                        flag = False
+                        break
+                if flag:
+                    res.append({"date": date, "lesson": lesson})
+            return res
+                    
+                    
+
+        
+
+        
+        
+        # docs = self.db.collection("Lessons").get()
+        # res = []
+        # for doc in docs:
+        #     for k, v in doc.to_dict().items():
+        #         v = json.loads(v)
+        #         for q, val in query.items():
+        #             if v['level'] in query['level']  and v['price'] < 100: 
+        #                 res.append({'instructor_id': doc.id, 'date': k, 'lesson': v })
+        # self.debug_print(res)
+        # return [query]
+        
+
+
 
     def get_good_message(self, date, lesson, instructor_id):
         name = self.get_instructor_name(instructor_id)
@@ -211,6 +319,8 @@ class data:
         txt = f'''Hey {name}, unfortunately someone just canceled his attending to your class at {date}.
         Currently there are {curr}/{cap} participants.'''
         return txt
+    
+    
 
 
 def current_number_of_participeants(lesson):
@@ -235,3 +345,12 @@ def compare_keys(key, key_comp):
         start_comp, end_comp = key_comp[1].split('-')
         return compare_time(start, end, start_comp, end_comp)
     return False 
+
+def check_date(date):
+    date = date.split("_")[0].split("/")
+    datelen = len(date)
+    if datelen < 3 or datelen > 3:
+        return False
+    else:
+        date[0], date[2] = date[2], date[0]
+        return "/".join(date)
