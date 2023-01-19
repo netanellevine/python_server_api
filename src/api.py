@@ -137,10 +137,27 @@ def get_lessons_by_search(search: Search) -> list:
     return dal.get_lessons_by_search(search.dict())
 
 
+@app.get("/instructor/stats")
+def get_instructor_name(userId: str,startDate: str , endDate:str) -> dict:
+    return dal.get_instructor_stat(userId,startDate,endDate)
+
+@app.get('/lessons/delete')
+def delete_lesson(instructor_id: str, full_date: str) -> bool:
+    return dal.delete_lesson(instructor_id, full_date)
+
+@app.get('/lessons/upcoming')
+def upcoming_lessons(userId: str,startDate: str,upcomingAmount:int) -> list:
+    return dal.upcoming_lessons(userId,startDate,upcomingAmount)
+
+@app.get('/lessons/history')
+def history_lessons(userId: str,endDate: str,historyAmount:int) -> list:
+    return dal.history_lessons(userId,endDate,historyAmount)
 
 
-@app.get("/instructor/statistics")
-def get_instructor_name(instructorId: str,startDate: str , endDate:str) -> dict:
-    return dal.get_instructor_stat(instructorId,startDate,endDate)
+@app.get('/lessons/participant/upcoming')
+def upcoming_participant_lessons(userId: str,startDate: str,upcomingAmount:int) -> list:
+    return dal.upcoming_participant_lessons(userId,startDate,upcomingAmount)
 
-
+@app.get('/lessons/participant/history')
+def history_participant_lessons(userId: str,endDate: str,historyAmount:int) -> list:
+    return dal.history_participant_lessons(userId,endDate,historyAmount)
