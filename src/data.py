@@ -196,6 +196,14 @@ class data:
         self.debug_print(f"__GET request__  get instructor name -> returned: False, None")
         return 'None'
 
+    def get_participant_name(self, participant_id):
+        doc = self.db.collection('Participants').document(participant_id).get().to_dict()
+        if doc is not None:
+            self.debug_print(f"__GET request__  get participant name -> returned: True, name: {doc['firstName']} {doc['lastName']}")
+            return f"{doc['firstName']} {doc['lastName']}"
+        self.debug_print(f"__GET request__  get participant name -> returned: False, None")
+        return 'None'
+
 
     def get_instructor_id(self, instructor_name):
         docs = self.db.collection('Instructors').get()
@@ -223,7 +231,7 @@ class data:
     def get_instructor_stat(self, instructor_id, start_date, end_date):
         di = self.db.collection('Lessons').document(instructor_id).get().to_dict()
         if di is None:
-            return {}
+            return {"avgParticipants": 0, "avgRevenue" : 0, "totalLessons":0, "totalRevenue":0}
         # for key,value in di.items():
         #     print(f"{value['price']} , {value['ParticipantsList']}")
         di = {key: json.loads(value) for key, value in di.items() if start_date <=check_date(key) and check_date(key) <=end_date}
@@ -234,19 +242,23 @@ class data:
             lessons+=1
             part_sum += len(value['ParticipantsList'])
             revenue_sum += len(value['ParticipantsList'])*value['price']
-        return {"avgParticipants": part_sum/lessons, "avgRevenue" : revenue_sum/lessons,"totalLessons":lessons,"totalRevenue":revenue_sum}
+        if lessons == 0:
+            return {"avgParticipants": 0, "avgRevenue" : 0, "totalLessons":0, "totalRevenue":0}
+        return {"avgParticipants": round(part_sum/lessons,2), "avgRevenue" : round(revenue_sum/lessons,2),"totalLessons":lessons,"totalRevenue":round(revenue_sum,2)}
 
 
     def get_lessons_by_search(self, search):
         filters = ['instructorName', 'lessonName', 'level', 'price', 'date']
         query = {}
         levels = ['A', 'B', 'C']
-        maxPrice = 2**10
 
         for key, value in search.items():
-            if value not in [0, "string", ["string"], "", [""]]:
+            if value not in [0, "string", ["string"], "", [""], "any", ["any"]]:
                 if key == 'instructorName':
-                    query['instructor_id'] = self.get_instructor_id(value)
+                    instructor_id = self.get_instructor_id(value)
+                    if instructor_id == 'None' or instructor_id is None:
+                        return []
+                    query['instructor_id'] = instructor_id
                     continue
                 query[key] = value
         if query.get('level') == None:
@@ -254,55 +266,111 @@ class data:
         levels = query['level']
         levels.append('All')
         query.update({'level': levels})
-        self.debug_print(query)
+        self.debug_print(f'The search filters are -> {query}')
 
-
-        if query.get('instructor_id') != None:
-            doc = self.db.collection('Lessons').document(query['instructor_id']).get().to_dict()
+        query_k = query.keys()
+        res = []
+        docs = -1
+        flag_instructor = False
+        if 'instructor_id' in query_k:
+            docs = self.db.collection('Lessons').document(query['instructor_id']).get()
             del query['instructor_id']
-            query_k = query.keys()
-            res = []
-            for date, lesson in doc.items():
-                lesson = json.loads(lesson)
-                good_keys_vals  = {key: value for key, value in lesson.items() if key in query_k}
-                # self.debug_print(good_keys_vals)
-                flag = True
-                for k, v in good_keys_vals.items():
-                    if k == 'level':
-                        if v not in query[k]:
+            flag_instructor = True
+        else:
+            docs = self.db.collection("Lessons").get()
+        
+        docs = [docs] if flag_instructor else docs
+        for doc in docs:
+            if doc is not None:
+                for date, lesson in doc.to_dict().items():
+                    if query.get('date') != None and query.get('date') not in date:
+                        continue
+                    lesson = json.loads(lesson)
+                    good_keys_vals  = {key: value for key, value in lesson.items() if key in query_k}
+                    flag = True
+                    for k, v in good_keys_vals.items():
+                        if k == 'level':
+                            if v not in query[k]:
+                                flag = False
+                                break
+                        elif k == 'price':
+                            if v > query[k]:
+                                flag = False
+                                break 
+                            else:
+                                continue
+                        elif query[k] != v:
                             flag = False
                             break
-                    elif k == 'price':
-                        if v > query[k]:
-                            flag = False
-                            break 
-                        else:
-                            continue
-                    elif query[k] != v:
-                        flag = False
-                        break
-                if flag:
-                    res.append({"date": date, "lesson": lesson})
-            return res
-                    
-                    
+                    if flag:
+                        res.append({"doc_id": doc.id, "date": date, "lesson": lesson})
+        self.debug_print(f"__GET request__  get lessons by filters -> returned: {len(res) > 0}, found {len(res)} matches")
+        return res
 
-        
+    def delete_lesson(self, instructor_id, full_date):
+        lessons_list = self.db.collection('Lessons').document(instructor_id).get().to_dict()
+        if lessons_list is None or lessons_list.get(full_date) == None:
+            self.debug_print(f"__DELETE request__  delete lesson -> returned: False")
+            return False
 
-        
-        
-        # docs = self.db.collection("Lessons").get()
-        # res = []
-        # for doc in docs:
-        #     for k, v in doc.to_dict().items():
-        #         v = json.loads(v)
-        #         for q, val in query.items():
-        #             if v['level'] in query['level']  and v['price'] < 100: 
-        #                 res.append({'instructor_id': doc.id, 'date': k, 'lesson': v })
-        # self.debug_print(res)
-        # return [query]
-        
+        lesson = json.loads(lessons_list.get(full_date))
+        phone_list = [self.get_participant_phone(participant) for participant in lesson["ParticipantsList"]]
+        for phone, participant in zip(phone_list, lesson["ParticipantsList"]):
+            self.debug_print(f'{phone}, {participant}')
+            send_sms(phone, self.get_cancel_message(full_date, participant))
+            
+        self.debug_print(f'instructor: {instructor_id}, full_date: {full_date}\n {lessons_list[full_date]}')
+        self.debug_print(f"__DELETE request__  delete lesson -> returned: True")
+        del lessons_list[full_date]
+        self.db.collection("Lessons").document(instructor_id).set(lessons_list)
+        return True
+    
+    def upcoming_lessons(self,userId,startDate,upcomingAmount):
+        lesson_dict = self.db.collection('Lessons').document(userId).get().to_dict()
+        if lesson_dict is None:
+            return []
+        upcoming_dict = {check_date_with_hour(key):json.loads(value) for key,value in lesson_dict.items() if check_date_with_hour(key) >= startDate}
+        lesson_list = [{"doc_id":userId,"date":key.replace("_","\n"),"lesson":value} for key,value in upcoming_dict.items()]
+        lesson_list.sort(key=lambda x:x['date'])
+        self.debug_print(lesson_list)
+        return lesson_list[:upcomingAmount]
 
+
+    def history_lessons(self,userId,endDate,historyAmount):
+        lesson_dict = self.db.collection('Lessons').document(userId).get().to_dict()
+        if lesson_dict is None:
+            return []
+        history_dict = {check_date_with_hour(key):json.loads(value) for key,value in lesson_dict.items() if check_date_with_hour(key) < endDate}
+        lesson_list = [{"doc_id":userId,"date":key.replace("_","\n"),"lesson":value} for key,value in history_dict.items()]
+        lesson_list.sort(key=lambda x:x['date'],reverse=True)
+        self.debug_print(lesson_list)
+        return lesson_list[:historyAmount]  
+
+    def upcoming_participant_lessons(self,userId,startDate,upcomingAmount):
+        instructors = self.db.collection('Lessons').get()
+        participant_list = []
+        if instructors is None:
+            return []
+        for lesson_list in instructors:
+            lesson_dict = lesson_list.to_dict()
+            for key,value in lesson_dict.items():
+                if userId in value and check_date_with_hour(key) >= startDate:
+                    participant_list.append({"doc_id":userId,"date":key.replace('_','\n'),"lesson":json.loads(value)})
+        participant_list.sort(key=lambda x:x['date'])
+        return participant_list[:upcomingAmount]
+
+    def history_participant_lessons(self,userId,endDate,historyAmount):
+        instructors = self.db.collection('Lessons').get()
+        if instructors is None:
+            return []
+        participant_list = []
+        for lesson_list in instructors:
+            lesson_dict = lesson_list.to_dict()
+            for key,value in lesson_dict.items():
+                if userId in value and check_date_with_hour(key) < endDate:
+                    participant_list.append({"doc_id":userId,"date":key.replace('_','\n'),"lesson":json.loads(value)})
+        participant_list.sort(key=lambda x:x['date'])
+        return participant_list[:historyAmount]
 
 
     def get_good_message(self, date, lesson, instructor_id):
@@ -318,6 +386,11 @@ class data:
         curr, cap = current_number_of_participeants(lesson)
         txt = f'''Hey {name}, unfortunately someone just canceled his attending to your class at {date}.
         Currently there are {curr}/{cap} participants.'''
+        return txt
+
+    def get_cancel_message(self, date, participant_id):
+        name = self.get_participant_name(participant_id)
+        txt = f'''Hey {name}, unfortunately the Yoga lesson at {date} got canceled.'''
         return txt
     
     
@@ -354,3 +427,13 @@ def check_date(date):
     else:
         date[0], date[2] = date[2], date[0]
         return "/".join(date)
+
+def check_date_with_hour(date):
+    hour = date.split("_")
+    date = hour[0].split("/")
+    datelen = len(date)
+    if datelen < 3 or datelen > 3:
+        return False
+    else:
+        date[0], date[2] = date[2], date[0]
+        return f'{"/".join(date)}_{hour[1]}'
